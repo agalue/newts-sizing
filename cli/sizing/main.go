@@ -73,7 +73,7 @@ func calculate(c *cli.Context) error {
 	calculatedCapacity := (availBytesPerNode * float64(numberOfNodes)) / (totalSamplesPerMetric * averageSampleSize * replicationFactor)
 
 	fmt.Printf("1 GB = %d Bytes\n", int(math.Pow(2, 30)))
-	fmt.Printf("The total samples per metric would be %d assuming %d bytes per sample with a RT of %d\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
+	fmt.Printf("The total samples per metric would be %d assuming %d bytes per sample with a replication factor of %d\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
 	fmt.Printf("The available disk space bytes per Cassandra instance would be %d bytes\n", int(availBytesPerNode))
 	fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin\n", int(metricsCapacity/(collectionStep*60)), int(collectionStep))
 	fmt.Printf("The recommended number of Cassandra instances would be %d\n", numberOfNodes)
