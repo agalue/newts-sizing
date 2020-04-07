@@ -79,6 +79,13 @@ type metrics struct {
 	mu                  sync.Mutex
 }
 
+func (m *metrics) init(debug bool) {
+	m.debug = debug
+	m.nodeMap = make(map[string]int)
+	m.resourceMap = make(map[string]int)
+	m.interfaceMap = make(map[string]int)
+}
+
 func (m *metrics) incGroups() {
 	m.mu.Lock()
 	m.numOfGroups++
@@ -148,10 +155,10 @@ func (m *metrics) printResults() {
 	fmt.Printf("Number of OpenNMS Resources = %d\n", len(m.resourceMap))
 	fmt.Printf("Number of Groups (Newts Resources) = %d\n", m.numOfGroups)
 	// The total should be consistent with the following command:
-	// find /opt/opennms/share/rrd -name strings.properties -exec cat {} \; | grep -v "^[#]" | wc -l
+	// find /opt/opennms/share/rrd -name strings.properties -mtime -2 -exec cat {} \; | grep -v "^[#]" | wc -l
 	fmt.Printf("Number of String Metrics = %d\n", m.numOfStringMetrics)
 	// The total should be consistent with the following command when storeByGroup is enabled
-	// find /opennms-data/rrd -name ds.properties -exec cat {} \; | grep -v "^[#]" | wc -l
+	// find /opt/opennms/share/rrd -name ds.properties -mtime -2 -exec cat {} \; | grep -v "^[#]" | wc -l
 	fmt.Printf("Number of Numeric Metrics = %d\n", m.numOfNumericMetrics)
 	fmt.Printf("Total Size in Bytes = %s\n", bytefmt.ByteSize(uint64(m.totalSizeInBytes)))
 }
@@ -167,12 +174,8 @@ func analyze(c *cli.Context) error {
 	startDate := time.Now().Add(-newerThan)
 
 	// Initialize local variables that will hold the statistics
-	data := metrics{
-		debug:        debug,
-		nodeMap:      make(map[string]int),
-		resourceMap:  make(map[string]int),
-		interfaceMap: make(map[string]int),
-	}
+	data := metrics{}
+	data.init(debug)
 
 	// Prints the global variables
 	fmt.Printf("RRD Directory = %s\n", rrdDir)
