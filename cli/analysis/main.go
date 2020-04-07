@@ -13,11 +13,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"code.cloudfoundry.org/bytefmt"
+	"github.com/karrick/godirwalk"
 	"github.com/urfave/cli"
 )
 
@@ -64,6 +67,95 @@ var Command = cli.Command{
 	},
 }
 
+type metrics struct {
+	debug               bool
+	numOfGroups         int
+	numOfNumericMetrics int
+	numOfStringMetrics  int
+	nodeMap             map[string]int
+	resourceMap         map[string]int
+	interfaceMap        map[string]int
+	totalSizeInBytes    int64
+	mu                  sync.Mutex
+}
+
+func (m *metrics) incGroups() {
+	m.mu.Lock()
+	m.numOfGroups++
+	m.mu.Unlock()
+}
+
+func (m *metrics) addNumeric(numeric int) {
+	m.mu.Lock()
+	m.numOfNumericMetrics += numeric
+	m.mu.Unlock()
+}
+
+func (m *metrics) addString(strings int) {
+	m.mu.Lock()
+	m.numOfStringMetrics += strings
+	m.mu.Unlock()
+}
+
+func (m *metrics) addSize(size int64) {
+	m.mu.Lock()
+	m.totalSizeInBytes += size
+	m.mu.Unlock()
+}
+
+func (m *metrics) addNode(n string) {
+	m.mu.Lock()
+	m.nodeMap[n]++
+	m.mu.Unlock()
+}
+
+func (m *metrics) addIntf(i string) {
+	m.mu.Lock()
+	m.interfaceMap[i]++
+	m.mu.Unlock()
+}
+
+func (m *metrics) addResource(r string) {
+	m.mu.Lock()
+	m.resourceMap[r]++
+	m.mu.Unlock()
+}
+
+func (m *metrics) printSortedMap(data map[string]int) {
+	var keys []string
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		fmt.Printf(" %8d: %s (%d)\n", (i + 1), k, data[k])
+	}
+}
+
+func (m *metrics) printResults() {
+	if m.debug {
+		fmt.Println()
+		fmt.Println("Nodes:")
+		m.printSortedMap(m.nodeMap)
+		fmt.Println("IP Interfaces:")
+		m.printSortedMap(m.interfaceMap)
+		fmt.Println("Resources:")
+		m.printSortedMap(m.resourceMap)
+		fmt.Println()
+	}
+	fmt.Printf("Number of Nodes = %d\n", len(m.nodeMap))
+	fmt.Printf("Number of IP Interfaces = %d\n", len(m.interfaceMap))
+	fmt.Printf("Number of OpenNMS Resources = %d\n", len(m.resourceMap))
+	fmt.Printf("Number of Groups (Newts Resources) = %d\n", m.numOfGroups)
+	// The total should be consistent with the following command:
+	// find /opt/opennms/share/rrd -name strings.properties -exec cat {} \; | grep -v "^[#]" | wc -l
+	fmt.Printf("Number of String Metrics = %d\n", m.numOfStringMetrics)
+	// The total should be consistent with the following command when storeByGroup is enabled
+	// find /opennms-data/rrd -name ds.properties -exec cat {} \; | grep -v "^[#]" | wc -l
+	fmt.Printf("Number of Numeric Metrics = %d\n", m.numOfNumericMetrics)
+	fmt.Printf("Total Size in Bytes = %s\n", bytefmt.ByteSize(uint64(m.totalSizeInBytes)))
+}
+
 func analyze(c *cli.Context) error {
 	log.SetOutput(os.Stdout)
 	rrdDir := c.String("rrd-dir")
@@ -75,13 +167,12 @@ func analyze(c *cli.Context) error {
 	startDate := time.Now().Add(-newerThan)
 
 	// Initialize local variables that will hold the statistics
-	numOfGroups := 0
-	numOfNumericMetrics := 0
-	numOfStringMetrics := 0
-	nodeMap := make(map[string]int)
-	resourceMap := make(map[string]int)
-	interfaceMap := make(map[string]int)
-	var totalSizeInBytes int64 = 0
+	data := metrics{
+		debug:        debug,
+		nodeMap:      make(map[string]int),
+		resourceMap:  make(map[string]int),
+		interfaceMap: make(map[string]int),
+	}
 
 	// Prints the global variables
 	fmt.Printf("RRD Directory = %s\n", rrdDir)
@@ -90,55 +181,57 @@ func analyze(c *cli.Context) error {
 	fmt.Println("...")
 
 	// Analyze the data directory
-	err := filepath.Walk(rrdDir, func(path string, info os.FileInfo, err error) error {
-		// Skip errors while processing the files
-		if err != nil {
-			return err
-		}
-		// Skip directories as they are not relevant for this analysis
-		if info.IsDir() {
+	err := godirwalk.Walk(rrdDir, &godirwalk.Options{
+		Callback: func(path string, info *godirwalk.Dirent) error {
+			// Skip directories as they are not relevant for this analysis
+			if info.IsDir() {
+				return nil
+			}
+			// Get file statistics
+			stat, err := os.Stat(path)
+			if err != nil {
+				return err
+			}
+			// Ignore files older than the start date (based on the provided time range as Duration)
+			if !stat.ModTime().After(startDate) {
+				return nil
+			}
+			// Process only RRD/JRB files
+			if isRRD(path) {
+				if !singleMetric {
+					data.incGroups()
+				}
+				data.addSize(stat.Size())
+				data.addNumeric(countNumericMetrics(path, singleMetric))
+				data.addResource(filepath.Base(path))
+				// Count unique nodes
+				if nodeData := nodeRegExp.FindStringSubmatch(path); len(nodeData) == 2 {
+					data.addNode(nodeData[1])
+				}
+				// Count unique IP interfaces (response time resources from Pollerd)
+				if intfData := intfRegExp.FindStringSubmatch(path); len(intfData) == 2 {
+					data.addIntf(intfData[1])
+				}
+			}
+			// Process string properties
+			if info.Name() == stringsProperties {
+				data.addString(countStringMetrics(path))
+			}
 			return nil
-		}
-		// Ignore files older than the start date (based on the provided time range as Duration)
-		if !info.ModTime().After(startDate) {
-			return nil
-		}
-		// Process only RRD/JRB files
-		if isRRD(path) {
-			if !singleMetric {
-				numOfGroups++ // Resources from Newts perspective
-			}
-			totalSizeInBytes += info.Size()
-			numOfNumericMetrics += countNumericMetrics(path, singleMetric)
-			resourceMap[filepath.Base(path)]++
-			// Count unique nodes
-			if nodeData := nodeRegExp.FindStringSubmatch(path); len(nodeData) == 2 {
-				nodeMap[nodeData[1]]++
-			}
-			// Count unique IP interfaces (response time resources from Pollerd)
-			if intfData := intfRegExp.FindStringSubmatch(path); len(intfData) == 2 {
-				interfaceMap[intfData[1]]++
-			}
-		}
-		// Process string properties
-		if info.Name() == stringsProperties {
-			numOfStringMetrics += countStringMetrics(path)
-		}
-		return nil
+		},
+		ErrorCallback: func(osPathname string, err error) godirwalk.ErrorAction {
+			return godirwalk.SkipNode
+		},
+		Unsorted:            true, // set true for faster yet non-deterministic enumeration
+		FollowSymbolicLinks: true,
 	})
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
 	}
 
 	// Print the results
-	fmt.Printf("Number of Nodes = %d\n", len(nodeMap))
-	fmt.Printf("Number of IP Interfaces = %d\n", len(interfaceMap))
-	fmt.Printf("Number of Resources = %d\n", len(resourceMap))
-	fmt.Printf("Number of Groups = %d\n", numOfGroups)
-	fmt.Printf("Number of String Metrics = %d\n", numOfStringMetrics)
-	fmt.Printf("Number of Numeric Metrics = %d\n", numOfNumericMetrics)
-	fmt.Printf("Total Size in Bytes = %s\n", bytefmt.ByteSize(uint64(totalSizeInBytes)))
-
+	data.printResults()
 	return nil
 }
 
