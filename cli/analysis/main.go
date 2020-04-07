@@ -44,9 +44,9 @@ var Command = cli.Command{
 	Action:    analyze,
 	Flags: []cli.Flag{
 		cli.StringFlag{
-			Name:  "onms-home, o",
-			Usage: "The OpenNMS home directory",
-			Value: "/opt/opennms",
+			Name:  "rrd-dir, r",
+			Usage: "The RRD/JRB directory",
+			Value: "/opt/opennms/share/rrd",
 		},
 		cli.DurationFlag{
 			Name:  "newer-than, n",
@@ -66,13 +66,10 @@ var Command = cli.Command{
 
 func analyze(c *cli.Context) error {
 	log.SetOutput(os.Stdout)
-	onmsHome := c.String("onms-home")
+	rrdDir := c.String("rrd-dir")
 	newerThan := c.Duration("newer-than")
 	singleMetric := c.Bool("single-metric")
 	debug = c.Bool("debug")
-
-	// Initialize the location of the data directory
-	rrdDir := fmt.Sprintf("%s/share/rrd", onmsHome)
 
 	// Initialized the expected modified date on files based on the provided range in hours
 	startDate := time.Now().Add(-newerThan)
