@@ -45,9 +45,12 @@ var Command = cli.Command{
 			Value: 15,
 		},
 		cli.Float64Flag{
-			Name:     "total-metrics, m",
-			Usage:    "The expected total number of metrics to persist into the Cassandra cluster",
-			Required: true,
+			Name:  "total-metrics, m",
+			Usage: "The expected total number of metrics to persist into the Cassandra cluster (as an alternative to inyection-rate)",
+		},
+		cli.Float64Flag{
+			Name:  "injection-rate, R",
+			Usage: "The avarage number of samples per second injected to the cluster (as an alternative to total-metrics)",
 		},
 		cli.Float64Flag{
 			Name:     "disk-space, d",
@@ -65,6 +68,18 @@ func calculate(c *cli.Context) error {
 	percentageOverhead := c.Float64("disk-overhead")
 	metricsCapacity := c.Float64("total-metrics")
 	totalDiskSpacePerNode := c.Float64("disk-space")
+	injectionRate := c.Float64("injection-rate")
+
+	if injectionRate > 0 && metricsCapacity > 0 {
+		return fmt.Errorf("Please especify either the total metrics or the injection rate but not both")
+	}
+
+	fmt.Printf("1 GB = %d Bytes\n", int(math.Pow(2, 30)))
+
+	if injectionRate > 0 {
+		metricsCapacity = injectionRate * collectionStep * 60
+		fmt.Printf("Theoretical metrics capacity is %d\n", int(metricsCapacity))
+	}
 
 	totalSamplesPerMetric := (ttl * 86400) / (collectionStep * 60)
 	availBytesPerNode := totalDiskSpacePerNode * math.Pow(2, 30) * (1 - percentageOverhead/100)
@@ -72,7 +87,6 @@ func calculate(c *cli.Context) error {
 	numberOfNodes := roundUp(rawNumberOfNodes)
 	calculatedCapacity := (availBytesPerNode * float64(numberOfNodes)) / (totalSamplesPerMetric * averageSampleSize * replicationFactor)
 
-	fmt.Printf("1 GB = %d Bytes\n", int(math.Pow(2, 30)))
 	fmt.Printf("The total samples per metric would be %d assuming %d bytes per sample with a replication factor of %d\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
 	fmt.Printf("The available disk space bytes per Cassandra/ScyllaDB instance would be %d bytes\n", int(availBytesPerNode))
 	fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin\n", int(metricsCapacity/(collectionStep*60)), int(collectionStep))
