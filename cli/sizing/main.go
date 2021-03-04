@@ -78,31 +78,29 @@ func calculate(c *cli.Context) error {
 
 	if injectionRate > 0 {
 		metricsCapacity = injectionRate * collectionStep * 60
-		fmt.Printf("Theoretical metrics capacity is %d\n", int(metricsCapacity))
-	}
-
-	totalSamplesPerMetric := (ttl * 86400) / (collectionStep * 60)
-	availBytesPerNode := totalDiskSpacePerNode * math.Pow(2, 30) * (1 - percentageOverhead/100)
-	rawNumberOfNodes := (totalSamplesPerMetric * metricsCapacity * averageSampleSize * replicationFactor) / availBytesPerNode
-	numberOfNodes := roundUp(rawNumberOfNodes)
-	calculatedCapacity := (availBytesPerNode * float64(numberOfNodes)) / (totalSamplesPerMetric * averageSampleSize * replicationFactor)
-
-	fmt.Printf("The total samples per metric would be %d assuming %d bytes per sample with a replication factor of %d\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
-	fmt.Printf("The available disk space bytes per Cassandra/ScyllaDB instance would be %d bytes\n", int(availBytesPerNode))
-	fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin\n", int(metricsCapacity/(collectionStep*60)), int(collectionStep))
-	if numberOfNodes < int(replicationFactor) {
-		fmt.Printf("The recommended number of Cassandra instances would be %d, but due to the chosen replication factor, it should be at least %d\n", numberOfNodes, int(replicationFactor))
+		fmt.Printf("The calculated total number of metrics to persist every %dmin would be %d for an injection rate of %d samples/sec.\n", int(collectionStep), int(metricsCapacity), int(injectionRate))
 	} else {
-		fmt.Printf("The recommended number of Cassandra instances would be %d\n", numberOfNodes)
+		injectionRate = metricsCapacity / (collectionStep * 60)
+		fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin for a total number of metrics of %d.\n", int(injectionRate), int(collectionStep), int(metricsCapacity))
 	}
-	fmt.Printf("The calculated metrics capacity would be %d\n", int(calculatedCapacity))
-	return nil
-}
 
-func roundUp(value float64) int {
-	v := math.Ceil(value)
-	if value-v > 0 {
-		v++
+	overhead := (1 - percentageOverhead/100)
+	totalDiskPerNodeInBytes := math.Pow(2, 30) * totalDiskSpacePerNode
+	availDiskPerNode := totalDiskSpacePerNode * overhead
+	totalSamplesPerMetric := (ttl * 86400) / (collectionStep * 60)
+	sampleCapacityInBytes := metricsCapacity * totalSamplesPerMetric
+	clusterUsableDiskSpace := sampleCapacityInBytes * averageSampleSize
+	numberOfNodes := (clusterUsableDiskSpace * replicationFactor) / (totalDiskPerNodeInBytes * overhead)
+	dailyGrow := (metricsCapacity * (replicationFactor / numberOfNodes) * (86400 / (collectionStep * 60))) * averageSampleSize / math.Pow(2, 30)
+
+	fmt.Printf("The total samples per metric would be %d, assuming %d bytes per sample with a replication factor of %d.\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
+	fmt.Printf("The available disk space in bytes per Cassandra/ScyllaDB instance would be %d GB.\n", int(availDiskPerNode))
+	fmt.Printf("The cluster sample capacity (or size per metric for %d days of TTL) in bytes would be %d (or %d GB).\n", int(ttl), int(sampleCapacityInBytes), int(sampleCapacityInBytes/math.Pow(2, 30)))
+	if numberOfNodes < replicationFactor {
+		fmt.Printf("The calculated number of Cassandra/ScyllaDB instances would be %.2f instances, but due to the chosen replication factor, it should be at least %d.\n", numberOfNodes, int(replicationFactor))
+	} else {
+		fmt.Printf("The calculated number of Cassandra/ScyllaDB instances would be %.2f instances.\n", numberOfNodes)
 	}
-	return int(v)
+	fmt.Printf("The daily growth in disk space per node would be %.2f GB\n", dailyGrow)
+	return nil
 }

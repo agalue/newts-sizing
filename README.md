@@ -28,4 +28,6 @@ The `size` sub-command offers a suggestion for the number of instances on a give
 
 A variety of attributes are offered to finely tune the results.
 
-The total amount of metrics can be obtained using the OpenNMS Evaluation Layer, or the `analysis` sub-command on an installation with JRB/RRD files.
+The total number of metrics can be obtained using the OpenNMS Evaluation Layer, or the `analysis` sub-command on an installation with JRB/RRD files.
+
+Alternatively, if you know the expected injection rate or number of samples per second that will be injected into the cluster, you could use that instead of the total number of metrics.
