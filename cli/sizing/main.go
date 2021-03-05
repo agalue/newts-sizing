@@ -62,36 +62,36 @@ var Command = cli.Command{
 
 func calculate(c *cli.Context) error {
 	ttl := c.Float64("ttl")
-	collectionStep := c.Float64("interval")
+	collectionInterval := c.Float64("interval")
 	averageSampleSize := c.Float64("sample-size")
 	replicationFactor := c.Float64("replication-factor")
 	percentageOverhead := c.Float64("disk-overhead")
-	metricsCapacity := c.Float64("total-metrics")
+	totalMetrics := c.Float64("total-metrics")
 	totalDiskSpacePerNode := c.Float64("disk-space")
 	injectionRate := c.Float64("injection-rate")
 
-	if injectionRate > 0 && metricsCapacity > 0 {
-		return fmt.Errorf("Please especify either the total metrics or the injection rate but not both")
+	if injectionRate > 0 && totalMetrics > 0 {
+		return fmt.Errorf("Please especify either the total number of metrics or the injection rate but not both")
 	}
 
-	fmt.Printf("1 GB = %d Bytes\n", int(math.Pow(2, 30)))
+	fmt.Printf("All size calculations assume 1 GB = %d Bytes\n", int(math.Pow(2, 30)))
 
 	if injectionRate > 0 {
-		metricsCapacity = injectionRate * collectionStep * 60
-		fmt.Printf("The calculated total number of metrics to persist every %dmin would be %d for an injection rate of %d samples/sec.\n", int(collectionStep), int(metricsCapacity), int(injectionRate))
+		totalMetrics = injectionRate * collectionInterval * 60
+		fmt.Printf("The calculated total number of metrics to persist every %dmin would be %d for an injection rate of %d samples/sec.\n", int(collectionInterval), int(totalMetrics), int(injectionRate))
 	} else {
-		injectionRate = metricsCapacity / (collectionStep * 60)
-		fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin for a total number of metrics of %d.\n", int(injectionRate), int(collectionStep), int(metricsCapacity))
+		injectionRate = totalMetrics / (collectionInterval * 60)
+		fmt.Printf("The expected sample injection rate would be around %d samples/sec persisting data every %dmin for a total number of metrics of %d.\n", int(injectionRate), int(collectionInterval), int(totalMetrics))
 	}
 
-	overhead := (1 - percentageOverhead/100)
+	percentageAvailable := (1 - percentageOverhead/100)
 	totalDiskPerNodeInBytes := math.Pow(2, 30) * totalDiskSpacePerNode
-	availDiskPerNode := totalDiskSpacePerNode * overhead
-	totalSamplesPerMetric := (ttl * 86400) / (collectionStep * 60)
-	sampleCapacityInBytes := metricsCapacity * totalSamplesPerMetric
+	availDiskPerNode := totalDiskSpacePerNode * percentageAvailable
+	totalSamplesPerMetric := (ttl * 86400) / (collectionInterval * 60)
+	sampleCapacityInBytes := totalMetrics * totalSamplesPerMetric
 	clusterUsableDiskSpace := sampleCapacityInBytes * averageSampleSize
-	numberOfNodes := (clusterUsableDiskSpace * replicationFactor) / (totalDiskPerNodeInBytes * overhead)
-	dailyGrow := (metricsCapacity * (replicationFactor / numberOfNodes) * (86400 / (collectionStep * 60))) * averageSampleSize / math.Pow(2, 30)
+	numberOfNodes := (clusterUsableDiskSpace * replicationFactor) / (totalDiskPerNodeInBytes * percentageAvailable)
+	dailyGrowPerNode := (totalMetrics * (replicationFactor / numberOfNodes) * (86400 / (collectionInterval * 60))) * averageSampleSize / math.Pow(2, 30)
 
 	fmt.Printf("The total samples per metric would be %d, assuming %d bytes per sample with a replication factor of %d.\n", int(totalSamplesPerMetric), int(averageSampleSize), int(replicationFactor))
 	fmt.Printf("The available disk space in bytes per Cassandra/ScyllaDB instance would be %d GB.\n", int(availDiskPerNode))
@@ -101,6 +101,6 @@ func calculate(c *cli.Context) error {
 	} else {
 		fmt.Printf("The calculated number of Cassandra/ScyllaDB instances would be %.2f instances.\n", numberOfNodes)
 	}
-	fmt.Printf("The daily growth in disk space per node would be %.2f GB\n", dailyGrow)
+	fmt.Printf("The daily growth in disk space per node would be %.2f GB\n", dailyGrowPerNode)
 	return nil
 }
