@@ -32,7 +32,7 @@ var Command = cli.Command{
 		cli.Float64Flag{
 			Name:  "sample-size, s",
 			Usage: "Average sample size in bytes; the size of a row from the newts.samples table",
-			Value: 18,
+			Value: 14,
 		},
 		cli.Float64Flag{
 			Name:  "replication-factor, r",
@@ -42,7 +42,7 @@ var Command = cli.Command{
 		cli.Float64Flag{
 			Name:  "disk-overhead, o",
 			Usage: "The percentage of disk space overhead per Cassandra instance for compactions",
-			Value: 15,
+			Value: 10,
 		},
 		cli.Float64Flag{
 			Name:  "total-metrics, m",
@@ -70,8 +70,11 @@ func calculate(c *cli.Context) error {
 	totalDiskSpacePerNode := c.Float64("disk-space")
 	injectionRate := c.Float64("injection-rate")
 
+	if injectionRate == 0 && totalMetrics == 0 {
+		return fmt.Errorf("Please specify either \"total-metrics\" or \"injection-rate\"")
+	}
 	if injectionRate > 0 && totalMetrics > 0 {
-		return fmt.Errorf("Please especify either the total number of metrics or the injection rate but not both")
+		return fmt.Errorf("Please specify either \"total-metrics\" or \"injection-rate\", but not both simultaneously")
 	}
 
 	fmt.Printf("All size calculations assume 1 GB = %d Bytes\n", int(math.Pow(2, 30)))
